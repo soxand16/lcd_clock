@@ -39,7 +39,23 @@ const char digit[10][2] =
     {0xFF, 0x00},  /* "8" */
     {0xF7, 0x00}   /* "9" */
 };
+/*
+ * TimerA0 UpMode Configuration Parameter
+ * Use this struct to set up a 15ms timer
+ */
+Timer_A_initUpModeParam initUpParam_A0 =
+{
+        TIMER_A_CLOCKSOURCE_SMCLK,              // SMCLK Clock Source
+        TIMER_A_CLOCKSOURCE_DIVIDER_1,          // SMCLK/4 = 2MHz
+        30000,                                  // 15ms debounce period
+        TIMER_A_TAIE_INTERRUPT_DISABLE,         // Disable Timer interrupt
+        TIMER_A_CCIE_CCR0_INTERRUPT_ENABLE ,    // Enable CCR0 interrupt
+        TIMER_A_DO_CLEAR,                       // Clear value
+        true                                    // Start Timer
+};
+
 Calendar currentTime;
+volatile unsigned char S1buttonDebounce = 0;
 
 /*
  * Main routine
@@ -54,6 +70,9 @@ int main(void)
 
     // Initialize LCD
     init_LCD();
+
+    // enable interupts
+    __enable_interrupt();
 
     // Set initial time
     set_time(23, 59, 50);
@@ -120,6 +139,68 @@ void display_time()
     // Display the colons
     LCDM7 |= 0x04;
     LCDM20 |= 0x04;
+}
+
+/*
+ * PORT1 Interrupt Service Routine
+ * Handles S1 and S2 button press interrupts
+ */
+#pragma vector = PORT1_VECTOR
+__interrupt void PORT1_ISR(void)
+{
+    switch(__even_in_range(P1IV, P1IV_P1IFG7))
+    {
+        case P1IV_P1IFG1 :    // Button S1 pressed
+            /* TODO:
+             * Handle button debouncing
+             * Toggle LED and start/stop clock
+             */
+
+            if ((S1buttonDebounce) == 0)
+            {
+                // Set debounce flag on first high to low transition
+                S1buttonDebounce = 1;
+
+                // Toggle P1.0 output (the easy way)
+                // GPIO_toggleOutputOnPin(GPIO_PORT_P1,GPIO_PIN0);
+
+                // Toggle P1.0 output (the bit-manipulation way)
+                P1OUT ^= BIT0;   // Toggle bit 0
+                if(P1OUT & BIT0)
+                {
+                    RTC_C_holdClock(RTC_C_BASE);
+                }
+                else
+                {
+                    RTC_C_startClock(RTC_C_BASE);
+                }
+
+                // Start debounce timer
+                Timer_A_initUpMode(TIMER_A0_BASE, &initUpParam_A0);
+            }
+            break;
+        case P1IV_P1IFG2 :    // Button S2 pressed
+            break;
+        default: break;
+    }
+}
+
+/*
+ * Timer A0 Interrupt Service Routine
+ * Used as button debounce timer
+ */
+#pragma vector = TIMER0_A0_VECTOR
+__interrupt void TIMER0_A0_ISR (void)
+{
+    // TODO: Handle button debouncing
+    // Turn off the timer interrupt once button is released
+
+    // Button S1 released
+    if (P1IN & BIT1)
+    {
+        S1buttonDebounce = 0; // Clear button debounce
+        Timer_A_stop(TIMER_A0_BASE);
+    }
 }
 
 /*
